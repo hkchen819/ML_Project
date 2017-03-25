@@ -1,0 +1,142 @@
+---
+title: "Prediction of Weight Lifting Exercise"
+author: "Hk Chen"
+date: "2017/3/23"
+output: html_document
+
+---
+### Synopsis
+
+This report is based on the [Weight Lifting Exercise Dataset](http://groupware.les.inf.puc-rio.br/har). The dataset is collected from six participants with accelerometers on the belt, forearm, arm, and dumbell asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in **five different fashions**: exactly according to the specification (**Class A**), throwing the elbows to the front (**Class B**), lifting the dumbbell only halfway (**Class C**), lowering the dumbbell only halfway (**Class D**) and throwing the hips to the front (**Class E**).
+
+The purpose of this report is to quantify how well they do the exercise from the accelerometers measurements. We will try to predict which class each particular activity belongs.
+
+### Summary
+We have used R caret packages to build different regression models, including random forests, gradient boosting and K-nearest neighbors classifier. As observed,
+random forest has best accuracy and is the most computationally expensive.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+Sys.setlocale(category = "LC_ALL", locale = "English_United States.1252")
+library(caret)
+```
+
+### Data Processing
+
+First, we downloaded the training and testing data set.
+```{r}
+set.seed(12321)
+base_URL<-"http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test_URL<-"http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+base<-read.csv(base_URL,na.strings=c("NA",""))
+test<-read.csv(test_URL,na.strings=c("NA",""))
+dim(base);dim(test)
+```
+
+The dataset contains 160 variables. The first 6 columns are indices, names and timestamps which should be removed before prediction. Also, since some variables have NA values, we decided to remove this kind of variables first instead of imputing to see how prediction model work.
+
+We have also separated the training into two groups for later cross validation.
+
+```{r}
+# remove id, names, timestamps
+names(base)[1:6]
+base<-base[,7:160]
+test<-test[,7:160]
+
+# remove all columns with NAs
+full_data<-apply(!is.na(base),2,sum)== dim(base)[1]
+base<-base[,full_data]
+test<-test[,full_data]
+
+dim(base)
+
+# split data
+inTrain<-createDataPartition(y=base$classe,p=0.5,list=FALSE)
+training <- base[inTrain,]
+validation <- base[-inTrain,]
+```
+
+### Prediction Models
+
+The dataset has only 54 variables after processing. Three different prediction methods were built as below:
+
+#### *Method 1: Random forests*
+
+First model is random forests with R caret package default settings.
+
+```{r warning = FALSE, message = FALSE}
+cache = TRUE
+ptm <- proc.time()
+rf_model<-train(classe~.,data=training,method="rf")
+proc.time() - ptm
+```
+
+```{r}
+pred1 <- predict(rf_model, validation)
+confusionMatrix(pred1, validation$classe)
+```
+
+The result from random forests model is quite good. We have achieved **99%** accuracy while doing cross validation, which means the out of sample error is **less than 1%**.
+
+
+#### *Method 2: Gradient Boosting*
+
+The second model is graident boosting with R caret default setting.
+
+```{r warning = FALSE, message = FALSE}
+ptm <- proc.time()
+gbm_model<- train(classe~., data=training, method="gbm", verbose = FALSE)
+proc.time()-ptm
+```
+
+```{r}
+pred2 <- predict(gbm_model, validation)
+confusionMatrix(pred2, validation$classe)
+```
+
+We have reached **98%** accuracy while doing cross validation with gradient boosting model.
+
+#### *Method 3: K-Nearest Neighbor Classifier *
+
+The final model is the K-nearest neighbor classifier. As all variables have a different range, we have configured preProcess parameter in trainControl() for data standardization. Also, to increase accuracy, we have also enabled repeated cross-validation.
+
+```{r}
+ptm <- proc.time()
+trctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+knn_model<- train(classe~., data=training, method="knn", trControl=trctrl,
+                  preProcess = c("center", "scale"),
+                  tuneLength = 10)
+proc.time()-ptm
+```
+
+```{r}
+pred3 <- predict(knn_model, validation)
+confusionMatrix(pred3, validation$classe)
+```
+
+We have reached **94%** accuracy with K-nearest neighbor classifier.
+
+
+### Results
+
+```{r}
+rf_model
+gbm_model
+knn_model
+```
+
+#### As you can see, *random forests* model has best accuracy and is also most computationally expensive. In the final model, the number of variable at each split is 27 and the OOB estimate of error rate is 0.39%.
+
+```{r}
+print(rf_model$finalModel)
+plot(rf_model$finalModel)
+plot(rf_model)
+```
+
+
+#### Since no further need for combing models, we have directly used rf model to predict test cases.
+
+```{r}
+pred_test <- predict(rf_model, test)
+pred_test
+```
